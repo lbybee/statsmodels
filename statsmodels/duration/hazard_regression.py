@@ -77,7 +77,6 @@ _predict_cov_params_docstring = """
         otherwise optional."""
 
 
-
 class PHSurvivalTime(object):
 
     def __init__(self, time, status, exog, strata=None, entry=None,
