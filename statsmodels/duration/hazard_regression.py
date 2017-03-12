@@ -489,8 +489,8 @@ class PHReg(model.LikelihoodModel):
         The penalty is the ``elastic net`` penalty, which is a
         combination of L1 and L2 penalties.
 
-        The function that is minimized is: 
-        
+        The function that is minimized is:
+
         .. math::
 
             -loglike/n + alpha*((1-L1\_wt)*|params|_2^2/2 + L1\_wt*|params|_1)
@@ -549,6 +549,18 @@ class PHReg(model.LikelihoodModel):
             return self.breslow_gradient(params)
         elif self.ties == "efron":
             return self.efron_gradient(params)
+
+    def hessian_factor(self, params):
+        """
+        Returns the weights used to calculate the
+        weighted design matrix evaluted at `params`.  Important
+        for distributed estimation
+        """
+
+        if self.ties == "breslow":
+            return self.breslow_hessian_factor(params)
+        else:
+            raise NotImplementedError("efron_hessian_factor cur. not sup.")
 
     def hessian(self, params):
         """
@@ -767,6 +779,56 @@ class PHReg(model.LikelihoodModel):
                     xp1 -= (e_linpred[ix][:,None] * v).sum(0)
 
         return grad
+
+    def breslow_hessian_factor(self, params):
+        """
+        Returns the Hessian factor of the log partial likelihood evaluated at
+        `params`, using the Breslow method to handle tied times.
+        """
+
+        # TODO Add better documentation of what exactly this is, see Com. Eff.
+        # pg. 17, this is the rho term.  Note that this is the second derivative
+        # with respect to X^T_i \beta, NOTE this is the second derivative of
+        # the NEGATIVE ll.
+        surv = self.surv
+
+        hess_factor = np.zeros(self.exog.shape[0])
+
+        # Loop over strata
+        for stx in range(surv.nstrat):
+
+            uft_ix = surv.ufailt_ix[stx]
+            nuft = len(uft_ix)
+
+            exog_s = surv.exog_s[stx]
+
+            linpred = np.dot(exog_s, params)
+            if surv.offset_s is not None:
+                linpred += surv.offset_s[stx]
+            linpred -= linpred.max()
+            e_linpred = np.exp(linpred)
+
+            xp0 = 0.
+
+            # Iterate backward through the unique failure times.
+            for i in range(nuft)[::-1]:
+
+                # Update for new cases entering the risk set.
+                ix = surv.risk_enter[stx][i]
+                if len(ix) > 0:
+                    xp0 += e_linpred[ix].sum()
+
+                # Account for all cases that fail at this point.
+                m = len(uft_ix[i])
+                e_linpred_iu = e_linpred[uft_ix[i]]
+                fact = (e_linpred_iu * (xp0 - e_linpred_iu)) / (xp0 ** 2)
+                hess_factor[uft_ix[i]] = fact
+
+                # Update for new cases entering the risk set.
+                ix = surv.risk_exit[stx][i]
+                if len(ix) > 0:
+                    xp0 -= e_linpred[ix].sum()
+        return hess_factor
 
     def breslow_hessian(self, params):
         """
