@@ -962,13 +962,13 @@ class OLS(WLS):
                         refit=False, **kwargs):
         # Docstring attached below
 
-        from statsmodels.base.elastic_net import fit_elasticnet
+        from statsmodels.base.elastic_net import fit_elasticnet, fit_elasticnet_path
 
         if L1_wt == 0:
             return self._fit_ridge(alpha)
 
         # In the future we could add support for other penalties, e.g. SCAD.
-        if method != "elastic_net":
+        if method != "elastic_net" and method != "elastic_net_path":
             raise ValueError("method for fit_regularized must be elastic_net")
 
         # Set default parameters.
@@ -988,16 +988,27 @@ class OLS(WLS):
             score_kwds = {"scale": 1}
             hess_kwds = {"scale": 1}
 
-        return fit_elasticnet(self, method=method,
-                              alpha=alpha,
-                              L1_wt=L1_wt,
-                              start_params=start_params,
-                              loglike_kwds=loglike_kwds,
-                              score_kwds=score_kwds,
-                              hess_kwds=hess_kwds,
-                              refit=refit,
-                              check_step=False,
-                              **defaults)
+        if method == "elastic_net":
+            return fit_elasticnet(self, method=method,
+                                  alpha=alpha,
+                                  L1_wt=L1_wt,
+                                  start_params=start_params,
+                                  loglike_kwds=loglike_kwds,
+                                  score_kwds=score_kwds,
+                                  hess_kwds=hess_kwds,
+                                  refit=refit,
+                                  check_step=False,
+                                  **defaults)
+        if method == "elastic_net_path":
+            return fit_elasticnet_path(self, alpha_path=alpha,
+                                       L1_wt=L1_wt,
+                                       start_params=start_params,
+                                       loglike_kwds=loglike_kwds,
+                                       score_kwds=score_kwds,
+                                       hess_kwds=hess_kwds,
+                                       refit=refit,
+                                       check_step=False,
+                                       **defaults)
 
     fit_regularized.__doc__ = _fit_regularized_doc
 

@@ -245,6 +245,131 @@ def fit_elasticnet(model, method="coord_descent", maxiter=100,
     return refit
 
 
+def fit_elasticnet_path(model, alpha_path=np.arange(0., 1., 100),
+                        error_variance=None, **kwargs):
+    """
+    Return a path of elastic net regularized fits as well as corresponding
+    test statistics
+
+    Parameters
+    ----------
+    model : model object
+        A statsmodels object implementing ``loglike``, ``score``, and
+        ``hessian``.
+    alpha_path : array-like
+        Array of penalty weights.  Each element can itself be an array
+        of alpha values or a scalar.
+    error_variance : None or scalar
+        The error variance used when estimating the test statistic,
+        if None this corresponds to
+
+        ||y - X beta^{OLS}||_2^2 / (n - p)
+
+    Returns
+    -------
+    A results object.
+
+    Notes
+    -----
+    The test statistic here corresponds to the "covariance statistic"
+    proposed by Lockhart et al.
+
+    https://arxiv.org/abs/1301.7161
+
+    The implementation here works for GLMs and Cox regression.
+    """
+    # TODO
+    # ----
+    #
+    # * Add support for unknown error_variance where p > n.
+    #
+    # * Add support for cases where zeroed alpha values are
+    # included (e.g. intercept)
+    #
+    # * Confirm support for GLMs/Cox
+    #
+    # * Add support for more than OLS
+
+    defaults = {}
+    defaults.update(kwargs)
+
+    # select distribution for covariance statistic
+    n, p = model.exog.shape
+    if error_variance is None:
+        from scipy.stats import f
+        dist = lambda x: f.pdf(x, 2, n - p)
+    else:
+        from scipy.stats import expon
+        dist = expon.pdf
+
+    # generate error_variance if None
+    if error_variance is None:
+        # TODO ensure that this is fully general
+        error_fit = model.fit()
+        error_variance = error_fit.mse_model
+
+    # iterate over alpha values and build list of estimates
+    fit_l = []
+    param_l = []
+    for alpha in alpha_path:
+        defaults["alpha"] = alpha
+        fit = fit_elasticnet(model, **defaults)
+        fit_l.append(fit)
+        param_l.append(fit.params)
+    param_path = np.array(param_l)
+
+    # TODO see the below note
+    import statsmodels.api as sm
+
+    # generate fits for active parameter sets
+    active_fit_l = [None]
+    for i in range(len(fit_l) - 1):
+        active_set = fit_l[i].params != 0
+        if np.sum(active_set) > 0:
+            # TODO this has really got to go
+            active_model = sm.OLS(model.endog, model.exog[:,active_set])
+#            active_model = model.model_class(model.endog,
+#                                             model.exog[:,active_set]
+#                                             **model.init_kwds)
+            defaults["alpha"] = alpha_path[i]
+            active_fit = fit_elasticnet(active_model, **defaults)
+            active_fit_l.append(active_fit)
+        else:
+            active_fit_l.append(None)
+
+    # generate covariance statistic for each alpha
+    cov_stat_l = []
+    for active_fit, fit in zip(active_fit_l, fit_l):
+        cov_stat = np.inner(model.endog, fit.predict())
+        if active_fit is not None:
+            cov_stat -= np.inner(model.endog, active_fit.predict())
+        cov_stat /= error_variance
+        if active_fit is not None:
+            print cov_stat, np.sum(active_fit.params != 0), np.sum(fit.params != 0), "cov_stat"
+        else:
+            print cov_stat, None, np.sum(fit.params != 0), "cov_stat"
+
+        cov_stat_l.append(cov_stat)
+    cov_stat_path = np.array(cov_stat_l)
+
+    # now map the covariance statistics to parameters
+    # TODO map this to the standard statsmodels ContrastResults
+    min_active_ind = np.argmax(param_path != 0, axis=0)
+    pval = dist(cov_stat_path[min_active_ind])
+    pval[np.sum(param_path != 0, axis=0) == 0] = np.NAN
+#    pval[min_active_ind == 0] = np.NAN
+
+    # TODO add proper results class
+    res = {"cov_stat_path": cov_stat_path, "pval": pval,
+           "alpha_path": alpha_path, "fit_l": fit_l,
+           "active_fit_l": active_fit_l, "param_path": param_path,
+           "dist": dist}
+    return res
+
+
+
+
+
 def _opt_1d(func, grad, hess, model, start, L1_wt, tol,
             check_step=True):
     """
