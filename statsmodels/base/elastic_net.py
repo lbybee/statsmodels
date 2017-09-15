@@ -317,6 +317,7 @@ def fit_elasticnet_path(model, alpha_path=np.arange(0., 1., 100),
         fit_l.append(fit)
         param_l.append(fit.params)
     param_path = np.array(param_l)
+    param_path = np.vstack((np.zeros(p), param_path))
 
     # TODO see the below note
     import statsmodels.api as sm
