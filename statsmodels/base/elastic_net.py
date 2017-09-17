@@ -317,33 +317,53 @@ def fit_elasticnet_path(model, alpha_path=np.arange(0., 1., 100),
         fit_l.append(fit)
         param_l.append(fit.params)
     param_path = np.array(param_l)
+    fit_path = np.array(fit_l)
     param_path = np.vstack((np.zeros(p), param_path))
+    param_path_ind = np.sign(param_path)
+    break_points = param_path_ind != np.roll(param_path_ind, 1, axis=0)
+    break_diff = np.sum(break_points, axis=1)
+    break_points = (break_diff > 0)[1:]
+    # extract knots from path
+    fit_knots = fit_path[break_points]
+    # this takes the fits where the active set is different than
+    # the current fit
+    active_fit_knots = fit_path[np.roll(break_points, 1)][1:]
+    alpha_knots = alpha_path[break_points]
+    param_knots = param_path[1:,:][break_points,:]
+    break_knots = break_diff[1:][break_points]
 
     # TODO see the below note
     import statsmodels.api as sm
 
+    for fit, active_fit in zip(fit_knots, active_fit_knots):
+        print np.sum(fit.params != 0), np.sum(active_fit.params != 0)
+
     # generate fits for active parameter sets
     active_fit_l = [None]
-    for i in range(len(fit_l) - 1):
-        active_set = fit_l[i].params != 0
+    for alpha, fit in zip(alpha_knots, active_fit_knots):
+        active_set = fit.params != 0
         if np.sum(active_set) > 0:
-            # TODO this has really got to go
+#            # TODO this has really got to go
             active_model = sm.OLS(model.endog, model.exog[:,active_set])
-#            active_model = model.model_class(model.endog,
-#                                             model.exog[:,active_set]
-#                                             **model.init_kwds)
-            defaults["alpha"] = alpha_path[i]
+##            active_model = model.model_class(model.endog,
+##                                             model.exog[:,active_set]
+##                                             **model.init_kwds)
+            defaults["alpha"] = alpha
             active_fit = fit_elasticnet(active_model, **defaults)
             active_fit_l.append(active_fit)
         else:
             active_fit_l.append(None)
+    active_fit_knots = np.array(active_fit_l)
 
     # generate covariance statistic for each alpha
     cov_stat_l = []
-    for active_fit, fit in zip(active_fit_l, fit_l):
+    for active_fit, fit in zip(active_fit_knots, fit_knots):
         cov_stat = np.inner(model.endog, fit.predict())
         if active_fit is not None:
             cov_stat -= np.inner(model.endog, active_fit.predict())
+            cov_stat /= np.max([1, np.abs(np.sum(np.sign(fit.params)) - np.sum(np.sign(active_fit.params)))])
+        else:
+            cov_stat /= np.sum(fit.params != 0)
         cov_stat /= error_variance
         if active_fit is not None:
             print cov_stat, np.sum(active_fit.params != 0), np.sum(fit.params != 0), "cov_stat"
@@ -351,20 +371,20 @@ def fit_elasticnet_path(model, alpha_path=np.arange(0., 1., 100),
             print cov_stat, None, np.sum(fit.params != 0), "cov_stat"
 
         cov_stat_l.append(cov_stat)
-    cov_stat_path = np.array(cov_stat_l)
+    cov_stat_knots = np.array(cov_stat_l)
 
     # now map the covariance statistics to parameters
     # TODO map this to the standard statsmodels ContrastResults
-    min_active_ind = np.argmax(param_path != 0, axis=0)
-    pval = dist(cov_stat_path[min_active_ind])
+    min_active_ind = np.argmax(param_knots != 0, axis=0)
+    pval = dist(cov_stat_knots[min_active_ind])
     pval[np.sum(param_path != 0, axis=0) == 0] = np.NAN
 #    pval[min_active_ind == 0] = np.NAN
 
     # TODO add proper results class
-    res = {"cov_stat_path": cov_stat_path, "pval": pval,
-           "alpha_path": alpha_path, "fit_l": fit_l,
-           "active_fit_l": active_fit_l, "param_path": param_path,
-           "dist": dist}
+    res = {"cov_stat_knots": cov_stat_knots, "pval": pval,
+           "alpha_knots": alpha_knots, "fit_knots": fit_knots,
+           "active_fit_knots": active_fit_knots, "param_knots": param_knots,
+           "dist": dist, "break_knots": break_knots}
     return res
 
 
