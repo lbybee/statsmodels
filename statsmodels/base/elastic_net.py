@@ -308,81 +308,87 @@ def fit_elasticnet_path(model, alpha_path=np.arange(0., 1., 100),
         error_fit = model.fit()
         error_variance = error_fit.mse_model
 
-    # iterate over alpha values and build list of estimates
+    # iterate over alpha values and build list of params
+    param_path = []
     fit_l = []
-    param_l = []
     for alpha in alpha_path:
         defaults["alpha"] = alpha
         fit = fit_elasticnet(model, **defaults)
+        param_path.append(fit.params)
+        # NOTE we keep a list of fits calling predict to generate
+        # the test stat later
         fit_l.append(fit)
-        param_l.append(fit.params)
-    param_path = np.array(param_l)
-    fit_path = np.array(fit_l)
-    param_path = np.vstack((np.zeros(p), param_path))
+    param_path = np.vstack((np.zeros(p), np.array(param_path)))
     param_path_ind = np.sign(param_path)
     break_points = param_path_ind != np.roll(param_path_ind, 1, axis=0)
-    break_diff = np.sum(break_points, axis=1)
-    break_points = (break_diff > 0)[1:]
-    # extract knots from path
-    fit_knots = fit_path[break_points]
-    # this takes the fits where the active set is different than
-    # the current fit
-    active_fit_knots = fit_path[np.roll(break_points, 1)][1:]
-    alpha_knots = alpha_path[break_points]
-    param_knots = param_path[1:,:][break_points,:]
-    break_knots = break_diff[1:][break_points]
+    break_points = np.sum(break_points, axis=1)
+    break_points = (break_points > 0)[1:]
+    knot_count = np.sum(break_points)
+    fit_l = [f for f, b in zip(fit_l, break_points) if b]
+    # this takes the points where the sign of the params changes (knots)
+    param_knots = param_path[1:,:][break_points]
+    rolled_param_knots = param_path[np.roll(break_points, 1)][1:]
 
-    model_exog = model.exog.copy()
+    # we extract these to build a temporary model for the active fit
+    init_args = dict([(k, getattr(model, k, None)) for k in model._init_keys])
 
-    # generate fits for active parameter sets
-    active_fit_l = [None]
-    active_set_l = [None]
-    for alpha, fit in zip(alpha_knots, active_fit_knots):
-        active_set = fit.params != 0
-        if np.sum(active_set) > 0:
+    # generate params for active parameter sets
+    active_param_knots = []
+    active_fit_l = []
+    for alpha, params in zip(alpha_path[break_points], rolled_param_knots):
+        active_set = params != 0
+        active_model = model.__class__(model.endog, model.exog[:,active_set],
+                                       **init_args)
+        defaults["alpha"] = alpha
+        active_fit = fit_elasticnet(active_model, **defaults)
+        active_fit_l.append(active_fit)
+        active_param_knots.append(active_fit.params)
+    active_param_knots = np.array(active_param_knots)
 
-            # NOTE this is done because there isn't a good way
-            # to copy the model otherwise, we maintain
-            # a copy of the original exog to update
-            model.exog = model_exog[:,active_set]
-            defaults["alpha"] = alpha
-            active_fit = fit_elasticnet(model, **defaults)
-            active_fit_l.append(active_fit)
-        else:
-            active_fit_l.append(None)
-        active_set_l.append(active_set)
-    active_fit_knots = np.array(active_fit_l)
-    active_set_knots = np.array(active_set_l)
-
-
-    # generate covariance statistic for each alpha
-    cov_stat_l = []
-    for active_set, active_fit, fit in zip(active_set_knots, active_fit_knots, fit_knots):
-        cov_stat = np.inner(model.endog, fit.predict())
-        if active_fit is not None:
-            cov_stat -= np.inner(model.endog, active_fit.predict())
-            cov_stat /= np.max([1, np.sum(np.sign(fit.params[active_set]) != np.sign(active_fit.params))])
-        else:
-            cov_stat /= np.sum(fit.params != 0)
+    # generate covariance statistic for each knot
+    cov_stat_knots = []
+    for knot in range(knot_count):
+        cov_stat = np.inner(model.endog, fit_l[knot].predict())
+        cov_stat -= np.inner(model.endog, active_fit_l[knot].predict())
+        active_set = rolled_param_knots[knot,:] != 0
+        diff = (np.sign(param_knots[knot,:][active_set]) !=
+                np.sign(active_param_knots[knot,:]))
+        cov_stat /= np.max([1, np.sum(diff)])
         cov_stat /= error_variance
 
-        cov_stat_l.append(cov_stat)
+        cov_stat_knots.append(cov_stat)
     cov_stat_knots = np.array(cov_stat_l)
 
-    # now map the covariance statistics to parameters
-    # TODO map this to the standard statsmodels ContrastResults
-    min_active_ind = np.argmax(param_knots != 0, axis=0)
-    pval = dist(cov_stat_knots[min_active_ind])
-    pval[np.sum(param_path != 0, axis=0) == 0] = np.NAN
+#    # generate pval
+#    pval = dist(cov_stat_knots)
+
+    return RegularizedPathResults(model, param_knots, cov_stat_knots, dist)
+
+#    # now map the covariance statistics to parameters
+#    # TODO map this to the standard statsmodels ContrastResults
+#    min_active_ind = np.argmax(param_knots != 0, axis=0)
+#    pval = dist(cov_stat_knots)
+#    pval = dist(cov_stat_knots[min_active_ind])
+#    pval[np.sum(param_path != 0, axis=0) == 0] = np.NAN
 #    pval[min_active_ind == 0] = np.NAN
 
     # TODO add proper results class
-    res = {"cov_stat_knots": cov_stat_knots, "pval": pval,
-           "alpha_knots": alpha_knots, "fit_knots": fit_knots,
-           "active_fit_knots": active_fit_knots, "param_knots": param_knots,
-           "dist": dist, "break_knots": break_knots}
-    return res
+#    res = {"cov_stat_knots": cov_stat_knots, "pval": pval,
+#           "alpha_knots": alpha_knots, "fit_knots": fit_knots,
+#           "active_fit_knots": active_fit_knots, "param_knots": param_knots,
+#           "dist": dist, "break_knots": break_knots}
+#    return res
 
+
+class RegularizedPathResults(Results):
+
+    def __init__(self, model, params):
+        super(RegularizedPathResults, self).__init__(model, params)
+
+    @cache_readonly
+    def fittedvalues(self, alpha=None):
+
+        if alpha is None:
 
 
 
