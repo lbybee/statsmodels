@@ -332,43 +332,39 @@ def fit_elasticnet_path(model, alpha_path=np.arange(0., 1., 100),
     param_knots = param_path[1:,:][break_points,:]
     break_knots = break_diff[1:][break_points]
 
-    # TODO see the below note
-    import statsmodels.api as sm
-
-    for fit, active_fit in zip(fit_knots, active_fit_knots):
-        print np.sum(fit.params != 0), np.sum(active_fit.params != 0)
+    model_exog = model.exog.copy()
 
     # generate fits for active parameter sets
     active_fit_l = [None]
+    active_set_l = [None]
     for alpha, fit in zip(alpha_knots, active_fit_knots):
         active_set = fit.params != 0
         if np.sum(active_set) > 0:
-#            # TODO this has really got to go
-            active_model = sm.OLS(model.endog, model.exog[:,active_set])
-##            active_model = model.model_class(model.endog,
-##                                             model.exog[:,active_set]
-##                                             **model.init_kwds)
+
+            # NOTE this is done because there isn't a good way
+            # to copy the model otherwise, we maintain
+            # a copy of the original exog to update
+            model.exog = model_exog[:,active_set]
             defaults["alpha"] = alpha
-            active_fit = fit_elasticnet(active_model, **defaults)
+            active_fit = fit_elasticnet(model, **defaults)
             active_fit_l.append(active_fit)
         else:
             active_fit_l.append(None)
+        active_set_l.append(active_set)
     active_fit_knots = np.array(active_fit_l)
+    active_set_knots = np.array(active_set_l)
+
 
     # generate covariance statistic for each alpha
     cov_stat_l = []
-    for active_fit, fit in zip(active_fit_knots, fit_knots):
+    for active_set, active_fit, fit in zip(active_set_knots, active_fit_knots, fit_knots):
         cov_stat = np.inner(model.endog, fit.predict())
         if active_fit is not None:
             cov_stat -= np.inner(model.endog, active_fit.predict())
-            cov_stat /= np.max([1, np.abs(np.sum(np.sign(fit.params)) - np.sum(np.sign(active_fit.params)))])
+            cov_stat /= np.max([1, np.sum(np.sign(fit.params[active_set]) != np.sign(active_fit.params))])
         else:
             cov_stat /= np.sum(fit.params != 0)
         cov_stat /= error_variance
-        if active_fit is not None:
-            print cov_stat, np.sum(active_fit.params != 0), np.sum(fit.params != 0), "cov_stat"
-        else:
-            print cov_stat, None, np.sum(fit.params != 0), "cov_stat"
 
         cov_stat_l.append(cov_stat)
     cov_stat_knots = np.array(cov_stat_l)
