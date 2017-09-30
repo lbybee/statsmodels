@@ -487,15 +487,22 @@ class RegularizedPathResults(object):
         Regularized results object
         """
 
-        ind = np.where(self.pval_knots < sig_level)[0]
-        if ind.shape[0] == 0:
+        ind = self.pval_knots < sig_level
+        if np.sum(ind) == 0:
             raise ValueError("No knots match provided sig_level.")
 
         else:
             if order == "first":
-                return self.fit_l[ind[0]]
+                # first successful location
+                fsuccess = np.argmax(ind)
+                # last success for first string
+                flsuccess = np.argmax(~ind[fsuccess:])
+                if flsuccess:
+                    return self.fit_l[flsuccess + fsuccess - 1]
+                else:
+                    return self.fit_l[-1]
             elif order == "last":
-                return self.fit_l[ind[-1]]
+                return self.fit_l[np.argmax(ind[::-1])]
             else:
                 raise ValueError("Unsupported order provided.")
 
