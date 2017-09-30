@@ -315,8 +315,10 @@ def fit_elasticnet_path(model, alpha_path=np.arange(0., 1., 100),
         defaults["alpha"] = alpha
         fit = fit_elasticnet(model, **defaults)
         param_path.append(fit.params)
-        # NOTE we keep a list of fits calling predict to generate
-        # the test stat later
+        # TODO we have to keep a list of fits (and later active
+        # fits) for the predict method.  This is likely memory
+        # inefficient since we are keeping lots of duplicate
+        # data.  Handle this more cleanly.
         fit_l.append(fit)
     param_path = np.vstack((np.zeros(p), np.array(param_path)))
     param_path_ind = np.sign(param_path)
@@ -324,10 +326,12 @@ def fit_elasticnet_path(model, alpha_path=np.arange(0., 1., 100),
     break_points = np.sum(break_points, axis=1)
     break_points = (break_points > 0)[1:]
     knot_count = np.sum(break_points)
-    fit_l = [f for f, b in zip(fit_l, break_points) if b]
+    fit_l = [fit for fit, b in zip(fit_l, break_points) if b]
     # this takes the points where the sign of the params changes (knots)
     param_knots = param_path[1:,:][break_points]
-    rolled_param_knots = param_path[np.roll(break_points, 1)][1:]
+    # this generates the active set just prior to each knot
+    active_set_knots = np.roll(param_path, 1)[1:,:][break_points] != 0
+    alpha_knots = alpha_path[break_points]
 
     # we extract these to build a temporary model for the active fit
     init_args = dict([(k, getattr(model, k, None)) for k in model._init_keys])
@@ -335,62 +339,165 @@ def fit_elasticnet_path(model, alpha_path=np.arange(0., 1., 100),
     # generate params for active parameter sets
     active_param_knots = []
     active_fit_l = []
-    for alpha, params in zip(alpha_path[break_points], rolled_param_knots):
-        active_set = params != 0
-        active_model = model.__class__(model.endog, model.exog[:,active_set],
-                                       **init_args)
-        defaults["alpha"] = alpha
-        active_fit = fit_elasticnet(active_model, **defaults)
-        active_fit_l.append(active_fit)
-        active_param_knots.append(active_fit.params)
-    active_param_knots = np.array(active_param_knots)
+    for alpha, active_set in zip(alpha_knots, active_set_knots):
+        if np.sum(active_set) > 0:
+            active_model = model.__class__(model.endog,
+                                           model.exog[:,active_set],
+                                           **init_args)
+            defaults["alpha"] = alpha
+            active_fit = fit_elasticnet(active_model, **defaults)
+            active_fit_l.append(active_fit)
+        else:
+            active_fit_l.append(None)
 
     # generate covariance statistic for each knot
     cov_stat_knots = []
     for knot in range(knot_count):
         cov_stat = np.inner(model.endog, fit_l[knot].predict())
-        cov_stat -= np.inner(model.endog, active_fit_l[knot].predict())
-        active_set = rolled_param_knots[knot,:] != 0
-        diff = (np.sign(param_knots[knot,:][active_set]) !=
-                np.sign(active_param_knots[knot,:]))
-        cov_stat /= np.max([1, np.sum(diff)])
+        if active_fit_l[knot] is not None:
+            cov_stat -= np.inner(model.endog, active_fit_l[knot].predict())
+            active_set = active_set_knots[knot,:] != 0
+            diff = (np.sign(param_knots[knot,:][active_set]) !=
+                    np.sign(active_fit_l[knot].params))
+            # divide the cov_stat by the number of changes in the knot
+            cov_stat /= np.max([1, np.sum(diff)])
+        else:
+            cov_stat /= np.sum(param_knots[knot,:] != 0)
         cov_stat /= error_variance
-
         cov_stat_knots.append(cov_stat)
-    cov_stat_knots = np.array(cov_stat_l)
+    cov_stat_knots = np.array(cov_stat_knots)
 
 #    # generate pval
-#    pval = dist(cov_stat_knots)
+    pval_knots = dist(cov_stat_knots)
 
-    return RegularizedPathResults(model, param_knots, cov_stat_knots, dist)
-
-#    # now map the covariance statistics to parameters
-#    # TODO map this to the standard statsmodels ContrastResults
-#    min_active_ind = np.argmax(param_knots != 0, axis=0)
-#    pval = dist(cov_stat_knots)
-#    pval = dist(cov_stat_knots[min_active_ind])
-#    pval[np.sum(param_path != 0, axis=0) == 0] = np.NAN
-#    pval[min_active_ind == 0] = np.NAN
-
-    # TODO add proper results class
-#    res = {"cov_stat_knots": cov_stat_knots, "pval": pval,
-#           "alpha_knots": alpha_knots, "fit_knots": fit_knots,
-#           "active_fit_knots": active_fit_knots, "param_knots": param_knots,
-#           "dist": dist, "break_knots": break_knots}
-#    return res
+    return RegularizedPathResults(fit_l, alpha_knots, param_knots,
+                                  cov_stat_knots, pval_knots)
 
 
-class RegularizedPathResults(Results):
+class RegularizedPathResults(object):
+    __doc__ = """
+    Class for entire path of regularized results
 
-    def __init__(self, model, params):
-        super(RegularizedPathResults, self).__init__(model, params)
+    Parameters
+    ----------
+    fit_l : list
+        list of regularized fits, each element corresponds to a knot
+    alpha_knots : array
+        alpha value for each knot
+    param_knots : array
+        params at each knot
+    cov_stat_knots : array
+        cov_stat at each knot
+    pval_knots : array
+        pval at each knot
 
-    @cache_readonly
-    def fittedvalues(self, alpha=None):
+    Attributes
+    ----------
+    fit_l : list
+        See Parameters.
+    alpha_knots : array
+        See Parameters.
+    param_knots : array
+        See Parameters.
+    cov_stat_knots : array
+        See Parameters.
+    pval_knots : array
+        See Parameters.
+    """
+
+    def __init__(self, fit_l, alpha_knots, param_knots, cov_stat_knots,
+                 pval_knots):
+
+        self.fit_l = fit_l
+        self.alpha_knots = alpha_knots
+        self.param_knots = param_knots
+        self.cov_stat_knots = cov_stat_knots
+        self.pval_knots = pval_knots
+
+    def predict(self, alpha=None, predict_kwds=None):
+        """generates predicted value for fit path, if a regularizing
+        constant (alpha) is not provided, returns the predicted values
+        for entire path
+
+        Parameters
+        ----------
+        alpha : None or scalar or array-like
+            alpha value for desired fit
+        predict_kwds : None or dict-like
+            additional key-words to be passed to predict
+
+        Returns
+        -------
+        array of predicted values
+        """
+
+        if predict_kwds is None:
+            predict_kwds = {}
 
         if alpha is None:
+            predict_l = []
+            for fit in self.fit_l:
+                predict_l.append(fit.predict(**predict_kwds))
+            predict_knots = np.vstack(predict_l)
+            return predict_knots
 
+        else:
+            if alpha not in self.alpha_knots:
+                raise ValueError("Provided alpha does not correspond to knot.")
+            else:
+                ind = np.where(self.alpha_knots == alpha)[0][0]
+                return fit_l[ind].predict(**predict_kwds)
 
+    def map_pval_params(self):
+        """maps each pval knot to the params activated
+        at that knot
+
+        Parameters
+        ----------
+        None
+
+        Returns
+        -------
+        array of pvals mapped to params, NAN used when a param
+        is never activated.
+        """
+
+        min_active_ind = np.argmax(self.param_knots != 0, axis=0)
+        pval = self.pval_knots[min_active_ind]
+        pval[min_active_ind == 0] = np.NAN
+
+        return pval
+
+    def select_fit(self, sig_level, order="first"):
+        """returns the fit corresponding to the provided sig_level,
+        selects the first or last knot matching depending on
+        order
+
+        Parameters
+        ----------
+        sig_level : scalar
+            significance level for selecting knot
+        order : str
+            either "first" or "last", if first return the first
+            knot to meet sig_level, if last return the last
+            knot to meet sig_level
+
+        Returns
+        -------
+        Regularized results object
+        """
+
+        ind = np.where(self.pval_knots < sig_level)[0]
+        if ind.shape[0] == 0:
+            raise ValueError("No knots match provided sig_level.")
+
+        else:
+            if order == "first":
+                return self.fit_l[ind[0]]
+            elif order == "last":
+                return self.fit_l[ind[-1]]
+            else:
+                raise ValueError("Unsupported order provided.")
 
 
 def _opt_1d(func, grad, hess, model, start, L1_wt, tol,
