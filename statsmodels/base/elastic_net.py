@@ -311,10 +311,14 @@ def fit_elasticnet_path(model, alpha_path=np.arange(0., 1., 100),
     # iterate over alpha values and build list of params
     param_path = []
     fit_l = []
+    params = np.zeros(model.exog.shape[1])
+    defaults["start_params"] = params
     for alpha in alpha_path:
         defaults["alpha"] = alpha
         fit = fit_elasticnet(model, **defaults)
-        param_path.append(fit.params)
+        params = fit.params
+        param_path.append(params)
+        defaults["start_params"] = params
         # TODO we have to keep a list of fits (and later active
         # fits) for the predict method.  This is likely memory
         # inefficient since we are keeping lots of duplicate
