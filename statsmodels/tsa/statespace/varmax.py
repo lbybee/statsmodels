@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 Vector Autoregressive Moving Average with eXogenous regressors model
 
@@ -108,7 +109,7 @@ class VARMAX(MLEModel):
 
     References
     ----------
-    .. [1] Lutkepohl, Helmut. 2007.
+    .. [1] Lütkepohl, Helmut. 2007.
        New Introduction to Multiple Time Series Analysis.
        Berlin: Springer.
 
@@ -271,15 +272,9 @@ class VARMAX(MLEModel):
         self._params_state_cov, offset = _slice('state_cov', offset)
         self._params_obs_cov, offset = _slice('obs_cov', offset)
 
-    def filter(self, params, **kwargs):
-        kwargs.setdefault('results_class', VARMAXResults)
-        kwargs.setdefault('results_wrapper_class', VARMAXResultsWrapper)
-        return super(VARMAX, self).filter(params, **kwargs)
-
-    def smooth(self, params, **kwargs):
-        kwargs.setdefault('results_class', VARMAXResults)
-        kwargs.setdefault('results_wrapper_class', VARMAXResultsWrapper)
-        return super(VARMAX, self).smooth(params, **kwargs)
+    @property
+    def _res_classes(self):
+        return {'fit': (VARMAXResults, VARMAXResultsWrapper)}
 
     @property
     def start_params(self):

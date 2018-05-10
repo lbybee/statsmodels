@@ -16,9 +16,15 @@ currently all tests are against R
 import os
 
 import numpy as np
+import pandas as pd
+
+# skipping some parts
+from distutils.version import LooseVersion
+PD_GE_17 = LooseVersion(pd.__version__) >= '0.17'
 
 from numpy.testing import (assert_, assert_almost_equal, assert_equal,
-                           assert_approx_equal, assert_allclose)
+                           assert_approx_equal, assert_allclose,
+                           assert_array_equal)
 import pytest
 
 from statsmodels.regression.linear_model import OLS, GLSAR
@@ -307,7 +313,25 @@ class TestDiagnosticG(object):
         assert_almost_equal(bg2, bg3, decimal=13)
 
     def test_acorr_ljung_box(self):
+
+        #unit-test which may be useful later
+        #ddof correction for fitted parameters in ARMA(p,q) fitdf=p+q
+        #> bt = Box.test(residuals(fm), lag=4, type = "Ljung-Box", fitdf=2)
+        #> mkhtest(bt, "ljung_box_4df2", "chi2")
+        # ljung_box_4df2 = dict(statistic=5.23587172795227,
+        #                       pvalue=0.0729532930400377,
+        #                       parameters=(2,), distr='chi2')
+
+        #> bt = Box.test(residuals(fm), lag=4, type = "Box-Pierce", fitdf=2)
+        #> mkhtest(bt, "ljung_box_bp_4df2", "chi2")
+        # ljung_box_bp_4df2 = dict(statistic=5.12462932741681,
+        #                          pvalue=0.0771260128929921,
+        #                          parameters=(2,), distr='chi2')
+
+
         res = self.res
+
+        #general test
 
         #> bt = Box.test(residuals(fm), lag=4, type = "Ljung-Box")
         #> mkhtest(bt, "ljung_box_4", "chi2")
@@ -320,24 +344,48 @@ class TestDiagnosticG(object):
                               pvalue=0.2747471266820692,
                               parameters=(4,), distr='chi2')
 
-        #ddof correction for fitted parameters in ARMA(p,q) fitdf=p+q
-        #> bt = Box.test(residuals(fm), lag=4, type = "Ljung-Box", fitdf=2)
-        #> mkhtest(bt, "ljung_box_4df2", "chi2")
-        ljung_box_4df2 = dict(statistic=5.23587172795227,
-                              pvalue=0.0729532930400377,
-                              parameters=(2,), distr='chi2')
-
-        #> bt = Box.test(residuals(fm), lag=4, type = "Box-Pierce", fitdf=2)
-        #> mkhtest(bt, "ljung_box_bp_4df2", "chi2")
-        ljung_box_bp_4df2 = dict(statistic=5.12462932741681,
-                                 pvalue=0.0771260128929921,
-                                 parameters=(2,), distr='chi2')
-
 
         lb, lbpval, bp, bppval = smsdia.acorr_ljungbox(res.resid, 4,
                                                        boxpierce=True)
-        compare_t_est([lb[-1], lbpval[-1]], ljung_box_4, decimal=(13, 14))
-        compare_t_est([bp[-1], bppval[-1]], ljung_box_bp_4, decimal=(13, 14))
+        compare_t_est([lb[-1], lbpval[-1]], ljung_box_4, decimal=(13, 13))
+        compare_t_est([bp[-1], bppval[-1]], ljung_box_bp_4, decimal=(13, 13))
+
+    def test_acorr_ljung_box_big_default(self):
+        res = self.res
+        #test with big dataset and default lag
+
+        #> bt = Box.test(residuals(fm), type = "Ljung-Box")
+        #> mkhtest(bt, "ljung_box_none", "chi2")
+        ljung_box_none = dict(statistic=51.03724531797195, pvalue=0.11334744923390,
+                              distr='chi2')
+
+        #> bt = Box.test(residuals(fm), type = "Box-Pierce")
+        #> mkhtest(bt, "ljung_box_bp_none", "chi2")
+        ljung_box_bp_none = dict(statistic=45.12238537034000,
+                              pvalue=0.26638168491464,
+                              distr='chi2')
+        lb, lbpval, bp, bppval = smsdia.acorr_ljungbox(res.resid, boxpierce=True)
+        compare_t_est([lb[-1], lbpval[-1]], ljung_box_none, decimal=(13, 13))
+        compare_t_est([bp[-1], bppval[-1]], ljung_box_bp_none, decimal=(13, 13))
+
+    def test_acorr_ljung_box_small_default(self):
+        res = self.res
+        #test with small dataset and default lag
+
+        #> bt = Box.test(residuals(fm), type = "Ljung-Box")
+        #> mkhtest(bt, "ljung_box_small", "chi2")
+        ljung_box_small = dict(statistic=9.61503968281915, pvalue=0.72507000996945,
+                           parameters=(0,), distr='chi2')
+
+        #> bt = Box.test(residuals(fm), type = "Box-Pierce")
+        #> mkhtest(bt, "ljung_box_bp_small", "chi2")
+        ljung_box_bp_small = dict(statistic=7.41692150864936,
+                              pvalue=0.87940785887006,
+                              parameters=(0,), distr='chi2')
+
+        lb, lbpval, bp, bppval = smsdia.acorr_ljungbox(res.resid[:30], boxpierce=True)
+        compare_t_est([lb[-1], lbpval[-1]], ljung_box_small, decimal=(13, 13))
+        compare_t_est([bp[-1], bppval[-1]], ljung_box_bp_small, decimal=(13, 13))
 
 
     def test_harvey_collier(self):
@@ -555,7 +603,7 @@ class TestDiagnosticG(object):
         #> lt = lillie.test(residuals(fm)[1:20])
         #> mkhtest(lt, "lilliefors", "-")
         lilliefors3 = dict(statistic=0.1333956004203103,
-                          pvalue=0.4618672180799566, parameters=(), distr='-')
+                          pvalue=0.20, parameters=(), distr='-')
 
         lf1 = smsdia.lilliefors(res.resid)
         lf2 = smsdia.lilliefors(res.resid**2)
@@ -595,8 +643,9 @@ class TestDiagnosticG(object):
         #this test is slow
         infl = oi.OLSInfluence(res)
 
-        fp = open(os.path.join(cur_dir,"results/influence_lsdiag_R.json"))
-        lsdiag = json.load(fp)
+        path = os.path.join(cur_dir, "results", "influence_lsdiag_R.json")
+        with open(path, 'r') as fp:
+            lsdiag = json.load(fp)
 
         #basic
         assert_almost_equal(np.array(lsdiag['cov.scaled']).reshape(3, 3),
@@ -740,8 +789,9 @@ def test_influence_wrapped():
     assert_(isinstance(df, DataFrame))
 
     #this test is slow
-    fp = open(os.path.join(cur_dir,"results/influence_lsdiag_R.json"))
-    lsdiag = json.load(fp)
+    path = os.path.join(cur_dir, "results", "influence_lsdiag_R.json")
+    with open(path, "r") as fp:
+        lsdiag = json.load(fp)
 
     c0, c1 = infl.cooks_distance #TODO: what's c1, it's pvalues? -ss
 
@@ -876,6 +926,32 @@ def test_outlier_test():
     np.testing.assert_almost_equal(res.values, res2, 7)
     np.testing.assert_equal(res.index.tolist(), sorted_labels)  # pylint: disable-msg=E1103
 
+    data = pd.DataFrame(np.column_stack((endog, exog)),
+                        columns='y const var1 var2'.split(),
+                        index=labels)
+
+    # check `order` with pandas bug in #3971
+    res_pd = OLS.from_formula('y ~ const + var1 + var2 - 0', data).fit()
+
+    res_outl2 = oi.outlier_test(res_pd, method='b', order=True)
+    assert_almost_equal(res_outl2.values, res2, 7)
+    assert_equal(res_outl2.index.tolist(), sorted_labels)
+
+    if PD_GE_17:
+        # pandas < 0.17 does not have sort_values method
+        res_outl1 = res_pd.outlier_test(method='b')
+        res_outl1 = res_outl1.sort_values(['unadj_p'], ascending=True)
+        assert_almost_equal(res_outl1.values, res2, 7)
+        assert_equal(res_outl1.index.tolist(), sorted_labels)
+        assert_array_equal(res_outl2.index, res_outl1.index)
+
+
+    # additional keywords in method
+    res_outl3 = res_pd.outlier_test(method='b', order=True)
+    assert_equal(res_outl3.index.tolist(), sorted_labels)
+    res_outl4 = res_pd.outlier_test(method='b', order=True, cutoff=0.15)
+    assert_equal(res_outl4.index.tolist(), sorted_labels[:1])
+
 
 if __name__ == '__main__':
     import pytest
@@ -955,4 +1031,3 @@ if __name__ == '__main__':
     Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
 
     '''
-

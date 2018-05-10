@@ -15,6 +15,7 @@ from statsmodels.genmod.generalized_linear_model import GLM
 from statsmodels.tools.tools import add_constant
 from statsmodels.tools.sm_exceptions import PerfectSeparationError
 from statsmodels.discrete import discrete_model as discrete
+from statsmodels.tools.sm_exceptions import DomainWarning
 import pytest
 import warnings
 
@@ -75,13 +76,16 @@ class CheckModelResultsMixin(object):
         resid2[:, 2] *= self.res1.family.link.deriv(self.res1.mu)**2
 
         atol = 10**(-self.decimal_resids)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", category=FutureWarning)
+            resid_a = self.res1.resid_anscombe
         resids = np.column_stack((self.res1.resid_pearson,
                 self.res1.resid_deviance, self.res1.resid_working,
-                self.res1.resid_anscombe, self.res1.resid_response))
+                resid_a, self.res1.resid_response))
         assert_allclose(resids, resid2, rtol=1e-6, atol=atol)
 
-
     decimal_aic_R = DECIMAL_4
+
     def test_aic_R(self):
         # R includes the estimation of the scale as a lost dof
         # Doesn't with Gamma though
@@ -89,16 +93,28 @@ class CheckModelResultsMixin(object):
             dof = 2
         else:
             dof = 0
-        assert_almost_equal(self.res1.aic+dof, self.res2.aic_R,
+        if isinstance(self.res1.model.family, (sm.families.NegativeBinomial)):
+            llf = self.res1.model.family.loglike(self.res1.model.endog,
+                                                 self.res1.mu,
+                                                 self.res1.model.var_weights,
+                                                 self.res1.model.freq_weights,
+                                                 scale=1)
+            aic = (-2*llf+2*(self.res1.df_model+1))
+        else:
+            aic = self.res1.aic
+        assert_almost_equal(aic+dof, self.res2.aic_R,
                 self.decimal_aic_R)
 
     decimal_aic_Stata = DECIMAL_4
     def test_aic_Stata(self):
         # Stata uses the below llf for aic definition for these families
         if isinstance(self.res1.model.family, (sm.families.Gamma,
-            sm.families.InverseGaussian)):
+            sm.families.InverseGaussian, sm.families.NegativeBinomial)):
             llf = self.res1.model.family.loglike(self.res1.model.endog,
-                                                 self.res1.mu, self.res1.model.freq_weights, scale=1)
+                                                 self.res1.mu,
+                                                 self.res1.model.var_weights,
+                                                 self.res1.model.freq_weights,
+                                                 scale=1)
             aic = (-2*llf+2*(self.res1.df_model+1))/self.res1.nobs
         else:
             aic = self.res1.aic/self.res1.nobs
@@ -119,9 +135,12 @@ class CheckModelResultsMixin(object):
         # Stata uses the below llf for these families
         # We differ with R for them
         if isinstance(self.res1.model.family, (sm.families.Gamma,
-            sm.families.InverseGaussian)):
+            sm.families.InverseGaussian, sm.families.NegativeBinomial)):
             llf = self.res1.model.family.loglike(self.res1.model.endog,
-                                                 self.res1.mu, self.res1.model.freq_weights, scale=1)
+                                                 self.res1.mu,
+                                                 self.res1.model.var_weights,
+                                                 self.res1.model.freq_weights,
+                                                 scale=1)
         else:
             llf = self.res1.llf
         assert_almost_equal(llf, self.res2.llf, self.decimal_loglike)
@@ -631,8 +650,12 @@ class TestGlmNegbinomial(CheckModelResultsMixin):
         interaction = cls.data.exog[:,2]*cls.data.exog[:,1]
         cls.data.exog = np.column_stack((cls.data.exog,interaction))
         cls.data.exog = add_constant(cls.data.exog, prepend=False)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", category=DomainWarning)
+            fam = sm.families.NegativeBinomial()
+
         cls.res1 = GLM(cls.data.endog, cls.data.exog,
-                family=sm.families.NegativeBinomial()).fit()
+                family=fam).fit(scale='x2')
         from .results.results_glm import Committee
         res2 = Committee()
         res2.aic_R += 2 # They don't count a degree of freedom for the scale
@@ -695,6 +718,7 @@ class TestGlmPoissonOffset(CheckModelResultsMixin):
         mod2 = GLM(endog, exog, family=sm.families.Poisson(),
                    offset=offset2).fit()
         assert_almost_equal(mod1.params, mod2.params)
+        assert_allclose(mod1.null, mod2.null, rtol=1e-10)
 
         # test recreating model
         mod1_ = mod1.model
@@ -755,7 +779,9 @@ def test_perfect_pred():
     y = y[y != 2]
     X = add_constant(X, prepend=True)
     glm = GLM(y, X, family=sm.families.Binomial())
-    assert_raises(PerfectSeparationError, glm.fit)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", category=RuntimeWarning)
+        assert_raises(PerfectSeparationError, glm.fit)
 
 
 def test_score_test_OLS():
@@ -859,6 +885,7 @@ def test_formula_missing_exposure():
     assert_(type(mod.exposure) is np.ndarray, msg='Exposure is not ndarray')
 
     exposure = pd.Series(np.random.uniform(size=5))
+    df.loc[3, 'Bar'] = 4   # nan not relevant for Valueerror for shape mismatch
     assert_raises(ValueError, smf.glm, "Foo ~ Bar", data=df,
                   exposure=exposure, family=family)
     assert_raises(ValueError, GLM, df.Foo, df[['constant', 'Bar']],
@@ -1170,6 +1197,35 @@ def test_gradient_irls_eim():
                                     atol=5e-5)
 
 
+def test_glm_irls_method():
+    nobs, k_vars = 50, 4
+    np.random.seed(987126)
+    x = np.random.randn(nobs, k_vars - 1)
+    exog = add_constant(x, has_constant='add')
+    y = exog.sum(1) + np.random.randn(nobs)
+
+    mod = GLM(y, exog)
+    res1 = mod.fit()
+    res2 = mod.fit(wls_method='pinv', attach_wls=True)
+    res3 = mod.fit(wls_method='qr', attach_wls=True)
+    # fit_gradient does not attach mle_settings
+    res_g1 = mod.fit(start_params=res1.params, method='bfgs')
+
+    for r in [res1, res2, res3]:
+        assert_equal(r.mle_settings['optimizer'], 'IRLS')
+        assert_equal(r.method, 'IRLS')
+
+    assert_equal(res1.mle_settings['wls_method'], 'lstsq')
+    assert_equal(res2.mle_settings['wls_method'], 'pinv')
+    assert_equal(res3.mle_settings['wls_method'], 'qr')
+
+    assert_(hasattr(res2.results_wls.model, 'pinv_wexog'))
+    assert_(hasattr(res3.results_wls.model, 'exog_Q'))
+
+    # fit_gradient currently does not attach mle_settings
+    assert_equal(res_g1.method, 'bfgs')
+
+
 class CheckWtdDuplicationMixin(object):
     decimal_params = DECIMAL_4
 
@@ -1261,7 +1317,7 @@ class CheckWtdDuplicationMixin(object):
 
 
 class TestWtdGlmPoisson(CheckWtdDuplicationMixin):
-    
+
     @classmethod
     def setup_class(cls):
         '''
@@ -1374,14 +1430,17 @@ class TestWtdGlmNegativeBinomial(CheckWtdDuplicationMixin):
         '''
         super(TestWtdGlmNegativeBinomial, cls).setup_class()
         alpha = 1.
-        family_link = sm.families.NegativeBinomial(
-            link=sm.families.links.nbinom(alpha=alpha),
-            alpha=alpha)
-        cls.res1 = GLM(cls.endog, cls.exog,
-                       freq_weights=cls.weight,
-                       family=family_link).fit()
-        cls.res2 = GLM(cls.endog_big, cls.exog_big,
-                       family=family_link).fit()
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", category=DomainWarning)
+            family_link = sm.families.NegativeBinomial(
+                link=sm.families.links.nbinom(alpha=alpha),
+                alpha=alpha)
+            cls.res1 = GLM(cls.endog, cls.exog,
+                           freq_weights=cls.weight,
+                           family=family_link).fit()
+            cls.res2 = GLM(cls.endog_big, cls.exog_big,
+                           family=family_link).fit()
 
 
 class TestWtdGlmGamma(CheckWtdDuplicationMixin):
@@ -1705,7 +1764,8 @@ class CheckTweedieSpecial(object):
                         rtol=1e-5, atol=1e-5)
         assert_allclose(self.res1.resid_working, self.res2.resid_working,
                         rtol=1e-5, atol=1e-5)
-        assert_allclose(self.res1.resid_anscombe, self.res2.resid_anscombe,
+        assert_allclose(self.res1.resid_anscombe_unscaled,
+                        self.res2.resid_anscombe_unscaled,
                         rtol=1e-5, atol=1e-5)
 
 
@@ -2018,9 +2078,13 @@ def test_non_invertible_hessian_fails_summary():
     data = sm.datasets.cpunish.load_pandas()
 
     data.endog[:] = 1
-    mod = sm.GLM(data.endog, data.exog, family=sm.families.Gamma())
-    res = mod.fit(maxiter=1, method='bfgs', max_start_irls=0)
-    res.summary()
+    with warnings.catch_warnings():
+        # we filter DomainWarning, the convergence problems
+        # and warnings in summary
+        warnings.simplefilter("ignore")
+        mod = sm.GLM(data.endog, data.exog, family=sm.families.Gamma())
+        res = mod.fit(maxiter=1, method='bfgs', max_start_irls=0)
+        res.summary()
 
 
 if __name__ == "__main__":

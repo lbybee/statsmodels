@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 from __future__ import division, print_function
 
 import math
@@ -281,7 +282,7 @@ def _endog_matrices(endog, exog, exog_coint, diff_lags, deterministic,
 
     References
     ----------
-    .. [1] Lutkepohl, H. 2005. *New Introduction to Multiple Time Series Analysis*. Springer.
+    .. [1] Lütkepohl, H. 2005. *New Introduction to Multiple Time Series Analysis*. Springer.
 
     """
     # p. 286:
@@ -355,7 +356,7 @@ def _r_matrices(delta_y_1_T, y_lag1, delta_x):
 
     References
     ----------
-    .. [1] Lutkepohl, H. 2005. *New Introduction to Multiple Time Series Analysis*. Springer.
+    .. [1] Lütkepohl, H. 2005. *New Introduction to Multiple Time Series Analysis*. Springer.
     """
 
     # todo: rewrite m such that a big (TxT) matrix is avoided
@@ -392,7 +393,7 @@ def _sij(delta_x, delta_y_1_T, y_lag1):
 
     References
     ----------
-    .. [1] Lutkepohl, H. 2005. *New Introduction to Multiple Time Series Analysis*. Springer.
+    .. [1] Lütkepohl, H. 2005. *New Introduction to Multiple Time Series Analysis*. Springer.
     """
     nobs = y_lag1.shape[1]
     r0, r1 = _r_matrices(delta_y_1_T, y_lag1, delta_x)
@@ -596,7 +597,7 @@ def coint_johansen(endog, det_order, k_ar_diff):
 
     References
     ----------
-    .. [1] Lutkepohl, H. 2005. *New Introduction to Multiple Time Series Analysis*. Springer.
+    .. [1] Lütkepohl, H. 2005. *New Introduction to Multiple Time Series Analysis*. Springer.
     """
     import warnings
     if det_order not in [-1, 0, 1]:
@@ -804,8 +805,10 @@ class VECM(tsbase.TimeSeriesModel):
 
     References
     ----------
-    .. [1] Lutkepohl, H. 2005. *New Introduction to Multiple Time Series Analysis*. Springer.
-    .. [2] Johansen, S. 1995. *Likelihood-Based Inference in Cointegrated Vector Autoregressive Models*. Oxford University Press.
+    .. [1] Lütkepohl, H. 2005. *New Introduction to Multiple Time Series Analysis*. Springer.
+
+    .. [2] Johansen, S. 1995. *Likelihood-Based Inference in Cointegrated *
+           *Vector Autoregressive Models*. Oxford University Press.
 
     """
 
@@ -847,7 +850,7 @@ class VECM(tsbase.TimeSeriesModel):
 
         References
         ----------
-        .. [1] Lutkepohl, H. 2005. *New Introduction to Multiple Time Series Analysis*. Springer.
+        .. [1] Lütkepohl, H. 2005. *New Introduction to Multiple Time Series Analysis*. Springer.
         """
         if method == "ml":
             return self._estimate_vecm_ml()
@@ -864,6 +867,7 @@ class VECM(tsbase.TimeSeriesModel):
         s00, s01, s10, s11, s11_, _, v = _sij(delta_x, delta_y_1_T, y_lag1)
 
         beta_tilde = (v[:, :self.coint_rank].T.dot(s11_)).T
+        beta_tilde = np.real_if_close(beta_tilde)
         # normalize beta tilde such that eye(r) forms the first r rows of it:
         beta_tilde = np.dot(beta_tilde, inv(beta_tilde[:self.coint_rank]))
         alpha_tilde = s01.dot(beta_tilde).dot(
@@ -900,7 +904,7 @@ class VECM(tsbase.TimeSeriesModel):
 
         References
         ----------
-        .. [1] Lutkepohl, H. 2005. *New Introduction to Multiple Time Series Analysis*. Springer.
+        .. [1] Lütkepohl, H. 2005. *New Introduction to Multiple Time Series Analysis*. Springer.
         """
         param_names = []
 
@@ -943,7 +947,7 @@ class VECM(tsbase.TimeSeriesModel):
 
         References
         ----------
-        .. [1] Lutkepohl, H. 2005. *New Introduction to Multiple Time Series Analysis*. Springer.
+        .. [1] Lütkepohl, H. 2005. *New Introduction to Multiple Time Series Analysis*. Springer.
         """
         param_names = []
 
@@ -1190,7 +1194,7 @@ class VECMResults(object):
 
     References
     ----------
-    .. [1] Lutkepohl, H. 2005. *New Introduction to Multiple Time Series Analysis*. Springer.
+    .. [1] Lütkepohl, H. 2005. *New Introduction to Multiple Time Series Analysis*. Springer.
     """
 
     def __init__(self, endog, exog, exog_coint, k_ar,
@@ -1356,7 +1360,7 @@ class VECMResults(object):
 
         References
         ----------
-        .. [1] Lutkepohl, H. 2005. *New Introduction to Multiple Time Series Analysis*. Springer.
+        .. [1] Lütkepohl, H. 2005. *New Introduction to Multiple Time Series Analysis*. Springer.
         """
         r = self.coint_rank
         _, r1 = _r_matrices(self._delta_y_1_T, self._y_lag1, self._delta_x)
@@ -1759,7 +1763,7 @@ class VECMResults(object):
 
         References
         ----------
-        .. [1] Lutkepohl, H. 2005. *New Introduction to Multiple Time Series Analysis*. Springer.
+        .. [1] Lütkepohl, H. 2005. *New Introduction to Multiple Time Series Analysis*. Springer.
 
         .. |H0| replace:: H\ :sub:`0`
 
@@ -1895,7 +1899,7 @@ class VECMResults(object):
 
         References
         ----------
-        .. [1] Lutkepohl, H. 2005. *New Introduction to Multiple Time Series Analysis*. Springer.
+        .. [1] Lütkepohl, H. 2005. *New Introduction to Multiple Time Series Analysis*. Springer.
 
         .. |H0| replace:: H\ :sub:`0`
 
@@ -1990,7 +1994,7 @@ class VECMResults(object):
 
         References
         ----------
-        .. [1] Lutkepohl, H. 2005. *New Introduction to Multiple Time Series Analysis*. Springer.
+        .. [1] Lütkepohl, H. 2005. *New Introduction to Multiple Time Series Analysis*. Springer.
         """
 
         statistic = 0

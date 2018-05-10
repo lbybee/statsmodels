@@ -21,7 +21,7 @@ from statsmodels.tsa.statespace.kalman_smoother import (
     SMOOTH_UNIVARIATE)
 from statsmodels.tsa.statespace.simulation_smoother import (
     SIMULATION_STATE, SIMULATION_DISTURBANCE, SIMULATION_ALL)
-from numpy.testing import assert_allclose, assert_almost_equal, assert_equal, assert_raises
+from numpy.testing import assert_allclose, assert_almost_equal, assert_equal
 import pytest
 
 current_path = os.path.dirname(os.path.abspath(__file__))
@@ -623,3 +623,19 @@ def test_simulation_smoothing_obs_intercept():
     sim.simulate(disturbance_variates=np.zeros(mod.nobs * 2),
                  initial_state_variates=np.zeros(1))
     assert_equal(sim.simulated_state[0], 0)
+
+
+def test_simulation_smoothing_state_intercept():
+    nobs = 10
+    intercept = 100
+    endog = np.ones(nobs) * intercept
+
+    mod = sarimax.SARIMAX(endog, order=(0, 0, 0), trend='c',
+                          measurement_error=True)
+    mod.initialize_known([100], [[0]])
+    mod.update([intercept, 1., 1.])
+
+    sim = mod.simulation_smoother()
+    sim.simulate(disturbance_variates=np.zeros(mod.nobs * 2),
+                 initial_state_variates=np.zeros(1))
+    assert_equal(sim.simulated_state[0], intercept)

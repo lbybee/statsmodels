@@ -52,11 +52,12 @@ import warnings
 from statsmodels.tools.sm_exceptions import InvalidTestWarning
 
 # need import in module instead of lazily to copy `__doc__`
+from statsmodels.regression._prediction import PredictionResults
 from . import _prediction as pred
 
 __docformat__ = 'restructuredtext en'
 
-__all__ = ['GLS', 'WLS', 'OLS', 'GLSAR']
+__all__ = ['GLS', 'WLS', 'OLS', 'GLSAR', 'PredictionResults']
 
 
 _fit_regularized_doc =\
@@ -164,8 +165,7 @@ def _get_sigma(sigma, nobs):
         if sigma.shape != (nobs, nobs):
             raise ValueError("Sigma must be a scalar, 1d of length %s or a 2d "
                              "array of shape %s x %s" % (nobs, nobs, nobs))
-        cholsigmainv = np.linalg.cholesky(np.linalg.pinv(sigma)).T
-
+        cholsigmainv = np.linalg.cholesky(np.linalg.inv(sigma)).T
     return sigma, cholsigmainv
 
 
@@ -1345,7 +1345,7 @@ class RegressionResults(base.LikelihoodModelResults):
     f_pvalue
         p-value of the F-statistic
     fittedvalues
-        The predicted the values for the original (unwhitened) design.
+        The predicted values for the original (unwhitened) design.
     het_scale
         adjusted squared residuals for heteroscedasticity robust standard
         errors. Is only available after `HC#_se` or `cov_HC#` is called.
@@ -2058,7 +2058,9 @@ class RegressionResults(base.LikelihoodModelResults):
         - 'HAC' and keywords
 
             - `maxlag` integer (required) : number of lags to use
-            - `kernel` string (optional) : kernel, default is Bartlett
+            - `kernel` callable or str (optional) : kernel
+                  currently available kernels are ['bartlett', 'uniform'],
+                  default is Bartlett
             - `use_correction` bool (optional) : If true, use small sample
                   correction
 
@@ -2087,7 +2089,9 @@ class RegressionResults(base.LikelihoodModelResults):
 
             - `time` array_like (required) : index of time periods
             - `maxlag` integer (required) : number of lags to use
-            - `kernel` string (optional) : kernel, default is Bartlett
+            - `kernel` callable or str (optional) : kernel
+                  currently available kernels are ['bartlett', 'uniform'],
+                  default is Bartlett
             - `use_correction` False or string in ['hac', 'cluster'] (optional) :
                   If False the the sandwich covariance is calulated without
                   small sample correction.
@@ -2112,7 +2116,9 @@ class RegressionResults(base.LikelihoodModelResults):
               `groups` : indicator for groups
               `time` : index of time periods
             - `maxlag` integer (required) : number of lags to use
-            - `kernel` string (optional) : kernel, default is Bartlett
+            - `kernel` callable or str (optional) : kernel
+                  currently available kernels are ['bartlett', 'uniform'],
+                  default is Bartlett
             - `use_correction` False or string in ['hac', 'cluster'] (optional) :
                   If False the sandwich covariance is calculated without
                   small sample correction.
@@ -2127,7 +2133,6 @@ class RegressionResults(base.LikelihoodModelResults):
         TODO: Currently there is no check for extra or misspelled keywords,
         except in the case of cov_type `HCx`
         """
-
         import statsmodels.stats.sandwich_covariance as sw
 
         # normalize names
@@ -2137,6 +2142,8 @@ class RegressionResults(base.LikelihoodModelResults):
             cov_type = 'hac-groupsum'
         if 'kernel' in kwds:
             kwds['weights_func'] = kwds.pop('kernel')
+        if 'weights_func' in kwds and not callable(kwds['weights_func']):
+            kwds['weights_func'] = sw.kernel_dict[kwds['weights_func']]
 
         # TODO: make separate function that returns a robust cov plus info
         use_self = kwds.pop('use_self', False)
@@ -2567,7 +2574,8 @@ class OLSResults(RegressionResults):
         from statsmodels.stats.outliers_influence import OLSInfluence
         return OLSInfluence(self)
 
-    def outlier_test(self, method='bonf', alpha=.05):
+    def outlier_test(self, method='bonf', alpha=.05, labels=None,
+                 order=False, cutoff=None):
         """
         Test observations for outliers according to method
 
@@ -2587,6 +2595,16 @@ class OLSResults(RegressionResults):
             See `statsmodels.stats.multitest.multipletests` for details.
         alpha : float
             familywise error rate
+        labels : None or array_like
+            If `labels` is not None, then it will be used as index to the
+            returned pandas DataFrame. See also Returns below
+        order : bool
+            Whether or not to order the results by the absolute value of the
+            studentized residuals. If labels are provided they will also be sorted.
+        cutoff : None or float in [0, 1]
+            If cutoff is not None, then the return only includes observations with
+            multiple testing corrected p-values strictly below the cutoff. The
+            returned array or dataframe can be empty if t
 
         Returns
         -------
@@ -2602,7 +2620,8 @@ class OLSResults(RegressionResults):
         df = df_resid - 1.
         """
         from statsmodels.stats.outliers_influence import outlier_test
-        return outlier_test(self, method, alpha)
+        return outlier_test(self, method, alpha, labels=labels,
+                            order=order, cutoff=cutoff)
 
     def el_test(self, b0_vals, param_nums, return_weights=0,
                 ret_params=0, method='nm',

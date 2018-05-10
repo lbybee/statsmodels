@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 Impulse reponse-related code
 """
@@ -162,10 +163,12 @@ class BaseIRAnalysis(object):
                                            seed=seed,
                                            component=component)
 
-        plotting.irf_grid_plot(irfs, stderr, impulse, response,
-                               self.model.names, title, signif=signif,
-                               subplot_params=subplot_params,
-                               plot_params=plot_params, stderr_type=stderr_type)
+        fig = plotting.irf_grid_plot(irfs, stderr, impulse, response,
+                                     self.model.names, title, signif=signif,
+                                     subplot_params=subplot_params,
+                                     plot_params=plot_params,
+                                     stderr_type=stderr_type)
+        return fig
 
     def plot_cum_effects(self, orth=False, impulse=None, response=None,
                          signif=0.05, plot_params=None,
@@ -221,10 +224,14 @@ class BaseIRAnalysis(object):
         if not plot_stderr:
             stderr = None
 
-        plotting.irf_grid_plot(cum_effects, stderr, impulse, response,
-                               self.model.names, title, signif=signif,
-                               hlines=lr_effects, subplot_params=subplot_params,
-                               plot_params=plot_params, stderr_type=stderr_type)
+        fig = plotting.irf_grid_plot(cum_effects, stderr, impulse, response,
+                                     self.model.names, title, signif=signif,
+                                     hlines=lr_effects,
+                                     subplot_params=subplot_params,
+                                     plot_params=plot_params,
+                                     stderr_type=stderr_type)
+        return fig
+
 
 class IRAnalysis(BaseIRAnalysis):
     """
@@ -237,7 +244,7 @@ class IRAnalysis(BaseIRAnalysis):
 
     Notes
     -----
-    Using Lutkepohl (2005) notation
+    Using Lütkepohl (2005) notation
     """
     def __init__(self, model, P=None, periods=10, order=None, svar=False,
                  vecm=False):
@@ -259,7 +266,7 @@ class IRAnalysis(BaseIRAnalysis):
 
         Notes
         -----
-        Lutkepohl eq 3.7.5
+        Lütkepohl eq 3.7.5
 
         Returns
         -------
@@ -290,6 +297,7 @@ class IRAnalysis(BaseIRAnalysis):
             return model.irf_errband_mc(orth=orth, repl=repl, T=periods,
                                         signif=signif, seed=seed,
                                         burn=burn, cum=False)
+
     def err_band_sz1(self, orth=False, svar=False, repl=1000,
                      signif=0.05, seed=None, burn=100, component=None):
         """

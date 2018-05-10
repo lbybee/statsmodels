@@ -7,9 +7,10 @@ from statsmodels.tsa.stattools import (adfuller, acf, pacf_ols, pacf_yw,
                                                coint, acovf, kpss, ResultsStore,
                                                arma_order_select_ic)
 import numpy as np
+import pandas as pd
+import pytest
 from numpy.testing import (assert_almost_equal, assert_equal, assert_warns,
-                           assert_raises, dec, assert_, assert_allclose)
-from numpy import genfromtxt
+                           assert_raises, assert_, assert_allclose)
 from statsmodels.datasets import macrodata, sunspots
 from pandas import Series, DatetimeIndex, DataFrame
 import os
@@ -126,11 +127,11 @@ class CheckCorrGram(object):
     """
     Set up for ACF, PACF tests.
     """
-    data = macrodata.load()
+    data = macrodata.load_pandas()
     x = data.data['realgdp']
     filename = os.path.dirname(os.path.abspath(__file__))+\
             "/results/results_corrgram.csv"
-    results = genfromtxt(open(filename, "rb"), delimiter=",", names=True,dtype=float)
+    results = pd.read_csv(filename, delimiter=',')
 
     #not needed: add 1. for lag zero
     #self.results['acvar'] = np.concatenate(([1.], self.results['acvar']))
@@ -146,8 +147,8 @@ class TestACF(CheckCorrGram):
         #cls.acf = np.concatenate(([1.], cls.acf))
         cls.qstat = cls.results['Q1']
         cls.res1 = acf(cls.x, nlags=40, qstat=True, alpha=.05)
-        cls.confint_res = cls.results[['acvar_lb','acvar_ub']].view((float,
-                                                                            2))
+        cls.confint_res = cls.results[['acvar_lb','acvar_ub']].as_matrix()
+
     def test_acf(self):
         assert_almost_equal(self.res1[0][1:41], self.acf, DECIMAL_8)
 
@@ -348,6 +349,13 @@ def test_coint():
             r1 = res1[i][2]
             assert_allclose(r1, r2, rtol=0, atol=6e-7)
 
+    # use default autolag #4490
+    res1_0 = coint(y[:, 0], y[:, 1], trend='ct', maxlag=4)
+    assert_allclose(res1_0[2], res_egranger['ct'][0][1:], rtol=0, atol=6e-7)
+    # the following is just a regression test
+    assert_allclose(res1_0[:2], [-13.992946638547112, 2.270898990540678e-27],
+                    rtol=1e-10, atol=1e-27)
+
 
 def test_coint_identical_series():
     nobs = 200
@@ -358,23 +366,22 @@ def test_coint_identical_series():
     with warnings.catch_warnings(record=True) as w:
         c = coint(y, y, trend="c", maxlag=0, autolag=None)
     assert_equal(len(w), 1)
-    assert_equal(c[0], 0.0)
-    # Limit of table
-    assert_(c[1] > .98)
+    assert_equal(c[1], 0.0)
+    assert_(np.isneginf(c[0]))
 
 
 def test_coint_perfect_collinearity():
+    # test uses nearly perfect collinearity
     nobs = 200
     scale_e = 1
     np.random.seed(123)
     x = scale_e * np.random.randn(nobs, 2)
-    y = 1 + x.sum(axis=1)
+    y = 1 + x.sum(axis=1) + 1e-7 * np.random.randn(nobs)
     warnings.simplefilter('always', ColinearityWarning)
     with warnings.catch_warnings(record=True) as w:
         c = coint(y, x, trend="c", maxlag=0, autolag=None)
-    assert_equal(c[0], 0.0)
-    # Limit of table
-    assert_(c[1] > .98)
+    assert_equal(c[1], 0.0)
+    assert_(np.isneginf(c[0]))
 
 
 class TestGrangerCausality(object):
@@ -491,7 +498,7 @@ def test_acovf_fft_vs_convolution():
             F2 = acovf(q, demean=demean, unbiased=unbiased, fft=False)
             assert_almost_equal(F1, F2, decimal=7)
 
-@dec.slow
+@pytest.mark.slow
 def test_arma_order_select_ic():
     # smoke test, assumes info-criteria are right
     from statsmodels.tsa.arima_process import arma_generate_sample

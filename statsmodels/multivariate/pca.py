@@ -110,15 +110,6 @@ class PCA(object):
     rows : array
         Array of indices indicating rows used in the PCA
 
-    Methods
-    -------
-    plot_scree
-        Scree plot of the eigenvalues
-    plot_rsquare
-        Individual series R-squared plotted against the number of factors
-    project
-        Compute projection for a given number of factors
-
     Examples
     --------
     Basic PCA using the correlation matrix of the data
@@ -186,7 +177,7 @@ class PCA(object):
 
     where the number of factors is less than the rank of X
 
-    .. [1] J. Bai and S. Ng, "Determining the number of factors in approximate
+    .. [*] J. Bai and S. Ng, "Determining the number of factors in approximate
        factor models," Econometrica, vol. 70, number 1, pp. 191-221, 2002
     """
 

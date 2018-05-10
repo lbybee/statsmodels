@@ -3,10 +3,11 @@ from statsmodels.compat.testing import skip, skipif
 
 import os
 import warnings
+from distutils.version import LooseVersion
 
 import numpy as np
 from numpy.testing import (assert_almost_equal, assert_, assert_allclose,
-                           assert_raises, dec)
+                           assert_raises)
 import pandas as pd
 from pandas import PeriodIndex, DatetimeIndex
 import pytest
@@ -16,10 +17,13 @@ from statsmodels.datasets.macrodata import load_pandas as load_macrodata_pandas
 import statsmodels.sandbox.tsa.fftarma as fa
 from statsmodels.tools.testing import assert_equal
 from statsmodels.tsa.arma_mle import Arma
-from statsmodels.tsa.arima_model import ARMA, ARIMA
+from statsmodels.tsa.arima_model import AR, ARMA, ARIMA
 from statsmodels.regression.linear_model import OLS
 from statsmodels.tsa.tests.results import results_arma, results_arima
 from statsmodels.tsa.arima_process import arma_generate_sample
+
+import scipy  # only needed for version check
+scipy_old = LooseVersion(scipy.__version__) < '0.16'
 
 try:
     import matplotlib.pyplot as plt
@@ -33,8 +37,9 @@ DECIMAL_2 = 2
 DECIMAL_1 = 1
 
 current_path = os.path.dirname(os.path.abspath(__file__))
-y_arma = np.genfromtxt(open(current_path + '/results/y_arma_data.csv', "rb"),
-        delimiter=",", skip_header=1, dtype=float)
+ydata_path = os.path.join(current_path, 'results', 'y_arma_data.csv')
+with open(ydata_path, "rb") as fd:
+    y_arma = np.genfromtxt(fd, delimiter=",", skip_header=1, dtype=float)
 
 cpi_dates = PeriodIndex(start='1959q1', end='2009q3', freq='Q')
 sun_dates = PeriodIndex(start='1700', end='2008', freq='A')
@@ -217,7 +222,7 @@ class Test_Y_ARMA14_NoConst(CheckArmaResultsMixin):
         cls.res2 = results_arma.Y_arma14()
 
 
-@dec.slow
+@pytest.mark.slow
 class Test_Y_ARMA41_NoConst(CheckArmaResultsMixin, CheckForecastMixin):
     @classmethod
     def setup_class(cls):
@@ -294,6 +299,32 @@ class Test_Y_ARMA22_Const(CheckArmaResultsMixin):
         endog = y_arma[:,9]
         cls.res1 = ARMA(endog, order=(2,2)).fit(trend="c", disp=-1)
         cls.res2 = results_arma.Y_arma22c()
+
+    def test_summary(self):
+        # regression test for html of roots table #4434
+        # we ignore whitespace in the assert
+        summ = self.res1.summary()
+        summ_roots = """\
+        <tableclass="simpletable">
+        <caption>Roots</caption>
+        <tr>
+        <td></td><th>Real</th><th>Imaginary</th><th>Modulus</th><th>Frequency</th>
+        </tr>
+        <tr>
+        <th>AR.1</th><td>1.0991</td><td>-1.2571j</td><td>1.6698</td><td>-0.1357</td>
+        </tr>
+        <tr>
+        <th>AR.2</th><td>1.0991</td><td>+1.2571j</td><td>1.6698</td><td>0.1357</td>
+        </tr>
+        <tr>
+        <th>MA.1</th><td>-1.1702</td><td>+0.0000j</td><td>1.1702</td><td>0.5000</td>
+        </tr>
+        <tr>
+        <th>MA.2</th><td>1.2215</td><td>+0.0000j</td><td>1.2215</td><td>0.0000</td>
+        </tr>
+        </table>"""
+        assert_equal(summ.tables[2]._repr_html_().replace(' ', ''),
+                     summ_roots.replace(' ', ''))
 
 
 class Test_Y_ARMA50_Const(CheckArmaResultsMixin, CheckForecastMixin):
@@ -470,7 +501,7 @@ def test_reset_trend():
     assert_equal(len(res1.params), len(res2.params)+1)
 
 
-@dec.slow
+@pytest.mark.slow
 def test_start_params_bug():
     data = np.array([1368., 1187, 1090, 1439, 2362, 2783, 2869, 2512, 1804,
     1544, 1028, 869, 1737, 2055, 1947, 1618, 1196, 867, 997, 1862, 2525,
@@ -1590,7 +1621,6 @@ def test_arima_predict_bug():
     from statsmodels.datasets import sunspots
     dta = sunspots.load_pandas().data.SUNACTIVITY
     dta.index = pd.DatetimeIndex(start='1700', end='2009', freq='A')[:309]
-    print(dta.index)
     arma_mod20 = ARMA(dta, (2,0)).fit(disp=-1)
     arma_mod20.predict(None, None)
 
@@ -2055,7 +2085,7 @@ def test_arima_diff2():
                      229.457]
     assert_almost_equal(predicted, predicted_res, 3)
 
-
+@skipif(scipy_old, reason='scipy is old, test might fail')
 def test_arima111_predict_exog_2127():
     # regression test for issue #2127
     ef =  [ 0.03005,  0.03917,  0.02828,  0.03644,  0.03379,  0.02744,
@@ -2092,8 +2122,8 @@ def test_arima111_predict_exog_2127():
     # rescaling results in convergence failure
     #model = sm.tsa.ARIMA(np.array(ef)*100, (1,1,1), exog=ue)
     model = ARIMA(ef, (1,1,1), exog=ue)
-    res = model.fit(transparams=False, iprint=0, disp=0)
-
+    res = model.fit(transparams=False, pgtol=1e-8, iprint=0, disp=0)
+    assert_equal(res.mle_retvals['warnflag'],  0)
     predicts = res.predict(start=len(ef), end = len(ef)+10,
                            exog=ue[-11:], typ = 'levels')
 
@@ -2110,7 +2140,7 @@ def test_arima111_predict_exog_2127():
             0.02372018,  0.02374833,  0.02367407,  0.0236443 ,  0.02362868,
             0.02362312])
 
-    assert_allclose(predicts, predicts_res, atol=1e-6)
+    assert_allclose(predicts, predicts_res, atol=5e-6)
 
 
 def test_ARIMA_exog_predict():
@@ -2225,6 +2255,12 @@ def test_ARIMA_exog_predict():
                                    dynamic=True)
     assert_allclose(dpredict_002, res_d002[-len(dpredict_002):], rtol=1e-4, atol=1e-6)
 
+    # in-sample dynamic predict should not need exog, #2982
+    predict_3a = res_002.predict(start=100, end=120, dynamic=True)
+    predict_3b = res_002.predict(start=100, end=120,
+                                 exog=exog_full.values[100:120], dynamic=True)
+    assert_allclose(predict_3a, predict_3b, rtol=1e-10)
+
 
 def test_arima_fit_mutliple_calls():
     y = [-1214.360173, -1848.209905, -2100.918158, -3647.483678, -4711.186773]
@@ -2234,8 +2270,24 @@ def test_arima_fit_mutliple_calls():
         mod.fit(disp=0, start_params=[np.mean(y), .1, .1, .1])
     assert_equal(mod.exog_names,  ['const', 'ar.L1.y', 'ma.L1.y', 'ma.L2.y'])
     with warnings.catch_warnings(record=True) as w:
-        mod.fit(disp=0, start_params=[np.mean(y), .1, .1, .1])
+        res= mod.fit(disp=0, start_params=[np.mean(y), .1, .1, .1])
     assert_equal(mod.exog_names,  ['const', 'ar.L1.y', 'ma.L1.y', 'ma.L2.y'])
+
+    #ensure summary() works
+    res.summary()
+
+    #test multiple calls when there is only a constant term
+    mod = ARIMA(y, (0, 0, 0))
+    # Make multiple calls to fit
+    with warnings.catch_warnings(record=True) as w:
+        mod.fit(disp=0, start_params=[np.mean(y)])
+    assert_equal(mod.exog_names,  ['const'])
+    with warnings.catch_warnings(record=True) as w:
+        res = mod.fit(disp=0, start_params=[np.mean(y)])
+    assert_equal(mod.exog_names,  ['const'])
+
+    # ensure summary() works
+    res.summary()
 
 def test_long_ar_start_params():
     np.random.seed(12345)
@@ -2286,6 +2338,30 @@ def test_arima_pickle():
     assert_almost_equal(res.pvalues, pkl_res.pvalues)
 
 
-if __name__ == "__main__":
-    import pytest
-    pytest.main([__file__, '-vvs', '-x', '--pdb'])
+def test_arima_not_implemented():
+    formula = ' WUE ~ 1 + SFO3 '
+    data = [-1214.360173, -1848.209905, -2100.918158]
+    assert_raises(NotImplementedError, ARIMA.from_formula, formula, data)
+
+
+def test_endog_int():
+    # int endog should produce same result as float, #3504
+
+    np.random.seed(123987)
+    y = np.random.random_integers(0, 15, size=100)
+    yf = y.astype(np.float64)
+
+    res = AR(y).fit(5)
+    resf = AR(yf).fit(5)
+    assert_allclose(res.params, resf.params, atol=1e-6)
+    assert_allclose(res.bse, resf.bse, atol=1e-6)
+
+    res = ARMA(y, order=(2, 1)).fit(disp=0)
+    resf = ARMA(yf, order=(2, 1)).fit(disp=0)
+    assert_allclose(res.params, resf.params, atol=1e-6)
+    assert_allclose(res.bse, resf.bse, atol=1e-6)
+
+    res = ARIMA(y.cumsum(), order=(1,1,1)).fit(disp=0)
+    resf = ARIMA(yf.cumsum(), order=(1,1,1)).fit(disp=0)
+    assert_allclose(res.params, resf.params, atol=1e-6)
+    assert_allclose(res.bse, resf.bse, atol=1e-6)
